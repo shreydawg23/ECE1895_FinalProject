@@ -1,0 +1,181 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © shreyviv23
+//Junior Design 1895 Project 3
+//MACD and Fibonacci Trading Strategy
+
+//@version=5
+
+
+//overlay set to true so indicators can be graphed, initial capital set to 1000, and default buy size 100
+strategy("MACD and Fibonacci Levels Trading Algorithm", overlay =  true, initial_capital = 1000, default_qty_value = 1, default_qty_type = strategy.percent_of_equity)
+
+
+var g_date = "Backtesting Start and End Date"
+fromMonth = input.int(defval = 1,    title = "From Month",  minval = 1, maxval = 12, group = g_date)
+fromDay   = input.int(defval = 1,    title = "From Day",    minval = 1, maxval = 31, group = g_date)
+fromYear  = input.int(defval = 2021, title = "From Year",   minval = 1970, group = g_date)
+thruMonth = input.int(defval = 1,    title = "Thru Month",  minval = 1, maxval = 12, group = g_date)
+thruDay   = input.int(defval = 1,    title = "Thru Day",    minval = 1, maxval = 31, group = g_date)
+thruYear  = input.int(defval = 2112, title = "Thru Year",   minval = 1970, group = g_date)
+
+
+// create function "within window of time"
+start     = timestamp(fromYear, fromMonth, fromDay, 00, 00)            
+finish    = timestamp(thruYear, thruMonth, thruDay, 23, 59)            
+window()  => time >= start and time <= finish ? true : false           
+
+
+//EMA length
+var g_ema = "EMA Settings"
+i_ema_filter    = input.int(title="EMA Filter Length", defval=200, group = g_ema)
+
+
+//MACD input   
+var g_macd      = "MACD Settings"
+i_price_src     = input.source(title="Price Source", defval=close, group=g_macd)
+i_fast_length   = input.int(title="Fast Length", defval=9, group=g_macd)
+i_slow_length   = input.int(title="Slow Length", defval=26, group=g_macd)
+i_signal_length = input.int(title="Signal Smoothing", minval=1, maxval=50, defval=9, group=g_macd)
+
+
+
+// MACD variables created using macd built in function
+[macdLine, signalLine, histLine] = ta.macd(i_price_src, i_fast_length, i_slow_length, i_signal_length)
+
+// Get indicator values
+ema = ta.ema(close, i_ema_filter)
+atr = ta.atr(14)
+
+// Check general system filters
+tradeFilters = not na(ema) and not na(atr)
+
+// Check trend conditions
+upTrend     = close > ema
+downTrend   = close < ema
+
+
+//Plot EMA
+plot(ema, color=close > ema ? color.green : color.red, linewidth=2, title="EMA")
+
+plot(macdLine, color = color.blue)
+plot(signalLine, color = color.red)
+
+// Check for zero-point crosses
+crossUp     = ta.crossover(signalLine, macdLine)
+crossDown   = ta.crossunder(signalLine, macdLine)
+
+plotshape(crossUp, style = shape.triangleup, color = color.green)
+plotshape(crossDown, style = shape.triangledown, color = color.red)
+
+
+//Moving fibonacci length, input is number of bars(days/hours/mins)
+
+var g_fib      = "Fibonacci Settings"
+
+fibLength = input.int(30, title = "Fibonacci Length", group = g_fib)
+
+
+// Compute Fibonacci levels
+Fib(len,ratio) =>
+    difference = ta.highest(len)-ta.lowest(len)
+    range_ratio = ta.highest(len) - (difference*ratio)
+
+
+//fib levels based on ratio
+max = Fib(fibLength,0)
+l_236 = Fib(fibLength,.236)
+l_382= Fib(fibLength,.382)
+l_50 = Fib(fibLength,.5)
+l_618 = Fib(fibLength,.618)
+l_786 = Fib(fibLength,.786)
+min = Fib(fibLength, 1)
+
+
+//return lower fib based on current price
+getFibLevels_lower(pc) => 
+    if pc >= l_236
+        l_236
+    else if pc >= l_382  
+        l_382
+    else if pc >=l_50
+        l_50
+    else if pc >=l_618
+        l_618
+    else if pc >=l_786
+        l_786
+    else 
+        min
+
+//return higher fib based on current price
+getFibLevels_higher(pc) => 
+    if pc >= l_236
+        max
+    else if pc >= l_382  
+        l_236
+    else if pc >=l_50
+        l_382
+    else if pc >=l_618
+        l_50
+    else if pc >=l_786
+        l_618
+    else 
+        l_786
+
+
+
+//plot fibonacci levels
+plot(max, color = color.white)
+plot(l_236, color = color.purple)
+plot(l_382, color = color.red)
+plot(l_50, color = color.blue)
+plot(l_618, color = color.yellow)
+plot(l_786, color = color.green)
+plot(min, color = color.maroon)
+
+
+
+upper_lvl = getFibLevels_higher(close)
+lower_lvl = getFibLevels_lower(close)
+
+//boolean logic to see if close is above or below fib level to start trade logic
+hitFibLevel = close >= upper_lvl or close <= lower_lvl
+
+//buy/sell signal BUY - 1 SELL - 0
+
+
+
+//my python trading strategy recreated in python using slightly different trade logic as there is no for loops
+
+//create arrays to set and update flag and last buy price because the var is immutable 
+var last_buy_price = array.new_float(1,0.0)
+var flag = array.new_float(1,0.0)
+
+
+//if price hit the fib level
+if hitFibLevel
+    //same trade logic as the python script except now makes sure its in timeframe
+    if signalLine > macdLine and array.get(flag,0) == 0 and window()
+        array.set(last_buy_price, 0, close)
+        array.set(flag,0,1)
+        
+        //open an order with Long indicator and buy 1 share at market price
+        
+        strategy.order("Buy",strategy.long, qty = 1, comment = "Buy 1 Share")
+    if signalLine < macdLine and array.get(flag,0) == 1 and close > array.get(last_buy_price,0) and window()
+        array.set(flag,0,0)
+        //close the order with short indicator and sell 1 share at market price
+        strategy.exit("Sell",from_entry = "Buy",qty = 1,stop = close, comment = "Sell 1 Share")
+
+//update lower and higher fib level
+else
+    upper_lvl := getFibLevels_higher(close)
+    lower_lvl := getFibLevels_lower(close)
+
+
+
+
+
+
+
+
+
